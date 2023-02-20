@@ -108,14 +108,39 @@ class Counter {
 물론 그렇다고 다 해결된 건 아니다. 수정된 코드에서 내포하는 문제를 다음에서 설명한다.
 
 **메모리의 미스터리**
-
 ```java
+public class Puzzle {
+	static boolean answerReady = false;
+	static int answer = 0;
+	static Thread t1 = new Thread() {
+		public void run() {
+			answer = 42;
+			answerReady = true;
+		}
+	};
+	static Thread t2 = new Thread() {
+		public void run() {
+			if (answerReady)
+				System.out.println("The meaning of life is:" + answer);
+			else
+				System.out.println("I don't know the answer");
+		}
+	};
 
+	public static void main(String[] args) throws InterruptedException {
+		t1.start(); t2.start();
+		t1.join();t2.join();
+	}
+}
 ```
 
- 위의 코드를 실행시 다음과 같은 결과를 볼 수도 있다.
+위의 코드를 실행시 다음과 같은 결과를 볼 수도 있다.
 
-이유가 뭘까? 
+```
+The meaning of life is: 0
+```
+
+이유가 뭘까?
 
 **메모리 가시성**
 
@@ -125,7 +150,7 @@ class Counter {
 
  그러나 “메서드를 다 동기화하면 되는가?” 라는 해결책은 멍청한 방법이다. 효율성도 떨어지고 스레드 대부분은 블로킹 된 상태를 유지할 것이다. 또한 둘 이상의 스레드에서 공유 메모리를 사용하다 보면 필연적으로 데드락이 발생할 가능성이 높아진다. 
 
-“식사하는 철학자” 모델을 생각해보자. 각 철학자는 양쪽의 젓가락을 들어올려서 식사를 한다. 
+“식사하는 철학자” 모델을 생각해보자. 각 철학자는 양쪽의 젓가락을 들어올려서 식사를 한다. 철학자는 생각을 하거나 배고픔을 느낀다. 배고프면 양쪽의 젓가락을 집어 올리고 식사를 한다. 식사가 끝이나면 젓가락을 내려놓는다.
 
 ### 내재된 잠금 장치를 넘어서
 내재된 잠금장치는 편리하지만 다음과 같은 한계를 가지고 있다.
