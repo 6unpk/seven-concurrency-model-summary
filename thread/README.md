@@ -404,3 +404,184 @@ public class Counting {
 ```
 
  AtomicInteger의 incrementAndGet() 메서드는 기능적으로 ++count 와 동일하다. 다른 점은 ++count 와 달리 원자적이다. 원자변수를 사용하면 잠금잠치의 획득과 해제를 신경쓸 필요가 없다. 그리고 잠금장치가 개입되지 않아서 원자변수에 대해 데드락이 걸리는 일도 불가능하다.
+ 
+ ### 거인의 어깨위에서
+
+ 스레드는 비싸다. 이말은 즉 스레드의 수가 늘어나면 늘어날 수록 잡아먹는 리소스가 늘어날 것이고, 비효율을 발생시킨다. 그래서 고안된 것이 바로 **“스레드 풀”** 이다. 웹 서버를 생각해보면, 외부로 들어오는 요청이 하나 늘어날 때 마다 똑같이 스레드를 계속해서 만들다 보면, 과도한 요청이 들어오거나 디도스 공격 같은일이 발생하면 서버가 금방 죽어버릴 정도로 매우 취약하다는 것이다.
+
+ 다음과 같이 스레드 풀을 쓰는 예제를 보자.
+
+```java
+int threadPoolSize = Runtime.getRuntime()
+```
+
+스레드 풀을 사용하면 문제가 해결된다.
+
+```java
+int threadPoolSize = Runtime.getRuntime().availableProcessors() * 2;
+ExecutorService executor = Executors.newFixedThreadPool(threadPoolSize);
+while (true) {
+	Socket socket = server.accept();
+	executor.execute(new ConnectionHandler(socket));
+}
+```
+
+**카피온라이트**
+
+이전에 우리는 동시성 프로그램 내부에서 청취자를 안전한게 호출하는 방법을 살펴보았다. updateProgress()를 수정해서 방어적인 카피를 만들도록 했다. 자바 표준 라이브러리는 이보다 더 깔끔하고 미리 준비된 해법인 CopyOnWriteArrayList를 제공한다.
+
+> **스레드 풀의 크기는 어느 정도로 만들어야 하나요?**
+스레드가 I/O 바운드 한가 아니면 CPU 바운드한가와 같은 여러 요소에 영향을 받는다. 전자의 경우 코어의 수와 동일한 스레드를 풀에 담는 것이 일반적이고, 후자의 경우 코어보다 많은 수를 사용하는 편이 낫다.
+> 
+
+**완전한 프로그램**
+
+실질적인 문제를 하나 풀어보자. 위키피디아에서 가장 흔히 사용되는 단어는 무엇일까? XML을 일단 내려받고 하나씩 다 읽어서 워드 카운팅을 한다. 문제는 데이터 크기가 40기가 바이트 정도여서 오래걸린다. 병렬화를 통해 속도를 높여보자. 일단은 순차적으로 구현한다.
+
+```java
+public class WordCount {
+	private static final HashMap<String, Integer> counts = new HashMap<String, Integer>();
+	
+	public static void main(String[] args) throws Exception {
+		Iterable<Page> pages = new Pages(10000, "enwiki.xml");
+		for (Page page: pages) {
+			Iterable<String> words = new Words(page.getText());
+			for (String word: words)
+				countWord(word);
+		}
+	}
+
+	private static void countWord(String word) {
+		Integer currentCount = counts.get(word);
+		if (currentCount == null)
+			counts.put(word, 1);
+		else
+			counts.put(word, currentCount + 1);
+	}
+}
+```
+
+병렬화된 버전에서 생각해보자. 메인 루프에서는 두 가지 업무를 수행한다. 우선 XML을 해석해 Page를 하나 만들고, 그 다음 그 안에 담긴 단어를 센다. 
+
+이를 해결할 고전적인 패턴이 있는데 바로, ‘생산자-소비자’ 패턴이다. 하나의 스레드는 값을 생성하고, 또 다른 스레드는 값을 소비하는 작업을 한다. 다음은 생산자 스레드이다.
+
+```java
+class Parser implements Runnable {
+	private BlockingQueue<Page> queue;
+
+	public Parser(BlockingQueue<Page> queue) {
+		this.queue = queue;
+	}
+
+	public void run() {
+		try {
+			
+		} catch (Exception e) { e.printStackTrace(); }
+	}
+}
+```
+
+다음은 소비자 스레드이다.
+
+```java
+class Counter implements Runnable {
+	private BlockingQueue<Page> queue;
+	private Map<String, Integer> counts;
+	public Counter(BlockingQueue<Page> queue, Map<String, Integer> counts) {
+		this.queue = queue;
+		this.counts = counts;
+	}
+
+	public void run() {
+		
+	}
+}
+```
+
+ 큐를 이용해서 가져오는 방식이다. 두 개 스레드를 생성하는 메인 루프는 다음과 같다.
+
+```java
+ArrayBlockingQueue<Page> queue = new ArrayBlockingQueue<Page>(100);
+HashMap<String, Integer> counts = new HashMap<String, Integer>();
+
+Thread counter = new Thread(new Counter(queue, counts));
+Thread parser = new Thread(new Parser(queue));
+
+counter.start();
+parser.start();
+parser.join();
+queue.put(new PosionPill());
+counter.join();
+```
+
+ArrayBlockingQueue 는 일반적으로 이러한 생산자-소비자 패턴을 구현할 때 쓰이는 자료구조이다. 
+
+> **왜 블로킹 큐를 이용하는가?**
+ 블로킹되지 않는 ConcurrentLinkedQueue 도 있다. 여기서 사용하지 않은 이유는, 생산자와 소비자의 속도를 맞추기 위해서다. 생산자가 소비자보다 빠르게 동작하면, 큐가 금방 차는데, 그렇게 되면 큐의 메모리 용량이 너무 커지는 문제가 있다.
+> 
+
+소비자를 조금더 병렬화 해서 해석속도를 높이는 방법이 있다. 이에 대한 해법으로 counts 맵에 대한 접근을 동기화하는 방법이 필요하다. 어떻게 동기화 할 수 있을까? 첫번째로는 synchronizedMap() 메서드를 호출하면 얻을 수 있는 동기화된 맵을 사용하는 방법이 있다. 그러나  수정하기와 쓰기는 원자적으로 이뤄지지 않기 때문에 별 도움이 안 된다. 따라서 접근 동기화를 직접 구현해야 한다.
+
+```java
+private void countWord(String word) {
+	lock.lock();
+	try {
+		Integer currentCount = counts.get(word);
+		if (currentCount == null)
+			counts.put(word, 1);
+		else
+			counts.put(word, currentCount + 1);
+	}  finally { lock.lock(); }
+}
+```
+
+그러나 막상 여러개의 스레드를 만들어서 실행을 해보면 다음과 같은 결과가 나온다.
+
+| 소비자 | 시간(초) | 성능 향상 |
+| --- | --- | --- |
+| 1 | 101 | 1.04 |
+| 2 | 212 | 0.49 |
+
+ 오히려 시간이 더 늘었다. 이유는 지나친 경합에 있다. 소비자 스레드가 counts 맵에 접근하기 위해서 너무 많은 시간을 기다려야 해서, 실제로 유용한 작업을 하는 시간보다 기다리는 시간이 더 많은 것이다. 
+
+ 따라서 대신 ConcurrentHashMap 을 사용해보자. 
+
+```java
+private void countWord(String word) {
+	while (true) {
+		Integer currentCount = counts.get(word);
+		if (currentCount == null) {
+			if (counts.putIfAbsent(word, 1) == null)
+				break;
+		}
+		else if (counts.replace(word, currentCount, currentCount + 1)) {
+			break;
+		}	
+	}
+}
+```
+
+이 경우 다음과 같이 성능이 향상되었다.
+
+| 소비자 | 시간 (초) | 성능 향상 |
+| --- | --- | --- |
+| 1 | 120 | 0.87 |
+| 2 | 83 | 1.26 |
+| 3 | 65 | 1.61 |
+| 4 | 63 | 1.67 |
+| 5 | 70 | 1.50 |
+| 6 | 79 | 1.33 |
+
+어느정도 성공했다. 근데 소비자 스레드가 4를 넘어선 이후 다시 느려진다. 이유는 마찬가지로 직전의 해법이 counts 맵에 대해 필요 이상의 경합을 만들어내고 있어서 그렇다. 따라서 하나로 공유하는 counts를 쓰는게 아니라 각 소비자가 일괄적으로 counts를 가지고 사용하는 것이 효과적이다. 마지막에 병합하면 된다.
+
+| 소비자 | 시간(초) | 성능 향상 |
+| --- | --- | --- |
+| 1 | 95 | 1.10 |
+| 2 | 57 | 1.83 |
+| 3 | 40 | 2.62 |
+| 4 | 39 | 2.69 |
+| 5 | 35 | 2.96 |
+| 6 | 33 | 3.14 |
+| 7 | 41 | 2.55 |
+
+덕분에 4배나 빨라졌다. 지금까지의 병렬 프로그램 작업의 성능 향상 과정을 보면 알겠지만, 초기에는 선형적으로 증가하다가 어느 시점부터는 둔화된다. 성능이 최고점에 도달하고 이후 스레드를 더 추가해도 오히려 속도가 느려진다.
